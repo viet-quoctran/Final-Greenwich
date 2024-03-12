@@ -9,6 +9,8 @@ use App\Models\Guest;
 use App\Models\User;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
+use App\Mail\AccountCreatedFromGuest;
+use Illuminate\Support\Facades\Mail;
 class AdminController extends Controller
 {
     // Phương thức cho màn hình login
@@ -36,19 +38,41 @@ class AdminController extends Controller
     {
         $guest = Guest::findOrFail($guestId);
         $user = User::where('email', $guest->email)->first(); // Tìm người dùng dựa trên email của khách hàng
+
         if (!$user) {
-            // Nếu người dùng không tồn tại, tạo một người dùng mới
+
             $user = new User();
             $user->email = $guest->email;
             $user->is_admin = 0;
             $user->name = $guest->fullname;
-            $user->password = Hash::make(Str::random(10));
-            $user->save();
-            $guest->delete();
+            
+            // Tạo mật khẩu mới
+            $newPassword = Str::random(10); 
+            $user->password = Hash::make($newPassword); 
+            
+            // Thử gửi email
+            try {
+                // Gửi email
+                Mail::to($user->email)->send(new AccountCreatedFromGuest($user->name, $user->email, $newPassword));
+                
+                // Nếu gửi email thành công, thì mới lưu user vào database và xoá guest
+                $user->save();
+                $guest->delete();
+
+                // Trả về thông báo và thông tin của user trong response JSON
+                $userData = $user->toArray();
+                return response()->json(['message' => 'Guest status updated successfully', 'user' => $userData]);
+            } catch (\Exception $e) {
+                // Nếu gửi email gặp lỗi, không lưu user và xoá guest
+                return response()->json(['error' => 'Failed to send email', 'details' => $e->getMessage()], 500);
+            }
+        } else {
+            // Nếu người dùng đã tồn tại, không cần tạo mới, trả về thông tin của user trong response JSON
+            $userData = $user->toArray();
+            return response()->json(['message' => 'User already exists', 'user' => $userData]);
         }
-        $guestArray = $user->toArray();
-        return response()->json(['message' => 'Guest status updated successfully','guest' => $guestArray]);
     }
+
     public function loginProcess(Request $request)
     {
         // Kiểm tra dữ liệu đầu vào
